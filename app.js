@@ -8,6 +8,10 @@
 
 'use strict';
 
+/* Bump on each deploy so the import screen shows when an update landed. */
+const APP_VERSION = 'v1.2.0';
+const APP_FULL_NAME = 'Faux Again Repetition Tool';
+
 /* ---------- pitch colors / values ---------- */
 const PITCH = {
   red:    { dot: '#c8463a', value: 1 },
@@ -194,13 +198,17 @@ function drawN(n) {
    ============================================================ */
 
 const CARDVAULT_SEARCH = 'https://api.cardvault.fabtcg.com/carddb/api/v1/advanced-search/?page_size=60&orderby=name&q=';
-const CardCache = new Map(); // normName -> { state, image, cost, type }
+const CardCache = new Map(); // cardKey -> { state, image, cost, type }
 
 function normName(n) {
   return String(n || '').toLowerCase().replace(/\s+/g, ' ').trim();
 }
+/** pitch value for a colour: red=1, yellow=2, blue=3; null for hero/equipment */
+function pitchValue(pitch) { return PITCH[pitch] ? PITCH[pitch].value : null; }
+/** cache key — a card name can exist in multiple pitches (red/yellow/blue), so include it */
+function cardKey(name, pitch) { return normName(name) + '::' + (pitch || ''); }
 
-async function cardvaultLookup(name) {
+async function cardvaultLookup(name, wantPitch) {
   // try the full name first, then each face of a "A // B" double-faced card
   const queries = [name];
   if (name.includes('//')) {
@@ -216,7 +224,10 @@ async function cardvaultLookup(name) {
     } catch (_) { continue; }
     const results = data.results || [];
     const want = normName(q);
-    const hit = results.find(r => normName(r.printed_name) === want)
+    const named = results.filter(r => normName(r.printed_name) === want);
+    // prefer the printing whose pitch matches the deck (red/yellow/blue cards share a name)
+    const hit = (wantPitch != null && named.find(r => String(r.printed_pitch) === String(wantPitch)))
+             || named[0]
              || results.find(r => normName(r.printed_name).startsWith(want));
     if (hit) {
       const img = hit.faces && hit.faces[0] && hit.faces[0].image;
@@ -230,15 +241,15 @@ async function cardvaultLookup(name) {
   return null;
 }
 
-/** Resolve a card's data once, caching the result. Returns a Promise<entry>. */
-function resolveCard(name) {
-  const key = normName(name);
+/** Resolve a card's data once (per name+pitch), caching the result. Returns a Promise<entry>. */
+function resolveCard(name, pitch) {
+  const key = cardKey(name, pitch);
   const existing = CardCache.get(key);
   if (existing) return existing.promise || Promise.resolve(existing);
   const entry = { state: 'pending', image: null, cost: null, type: null };
   entry.promise = (async () => {
     try {
-      const found = await cardvaultLookup(name);
+      const found = await cardvaultLookup(name, pitchValue(pitch));
       if (found) {
         entry.image = found.image;
         entry.cost = found.cost;
@@ -261,21 +272,21 @@ function resolveCard(name) {
 /** Kick off resolution for every face-up card on screen, then repaint each. */
 function hydrateVisibleCards() {
   const seen = new Set();
-  document.querySelectorAll('.card[data-cardname]').forEach(el => {
-    const key = el.dataset.cardname;
+  document.querySelectorAll('.card[data-cardkey]').forEach(el => {
+    const key = el.dataset.cardkey;
     if (seen.has(key)) return;
     seen.add(key);
     const entry = CardCache.get(key);
     if (entry && entry.state !== 'pending') return; // already resolved
-    resolveCard(el.dataset.realname).then(() => repaintCards(key));
+    resolveCard(el.dataset.realname, el.dataset.pitch || null).then(() => repaintCards(key));
   });
 }
 
 /** Replace every on-screen copy of a card with a freshly rendered face. */
 function repaintCards(key) {
-  document.querySelectorAll('.card[data-cardname]').forEach(el => {
-    if (el.dataset.cardname !== key) return;
-    const card = { name: el.dataset.realname, pitch: el.dataset.pitch };
+  document.querySelectorAll('.card[data-cardkey]').forEach(el => {
+    if (el.dataset.cardkey !== key) return;
+    const card = { name: el.dataset.realname, pitch: el.dataset.pitch || null };
     el.outerHTML = cardFaceHTML(card, { compact: el.classList.contains('compact') });
   });
 }
@@ -284,7 +295,7 @@ function repaintCards(key) {
 window.__cardImgFail = function (img) {
   const el = img.closest('.card');
   if (!el) return;
-  const key = el.dataset.cardname;
+  const key = el.dataset.cardkey;
   const entry = CardCache.get(key);
   if (entry) entry.image = null; // keep cost/type, just lose the image
   repaintCards(key);
@@ -298,17 +309,19 @@ window.__cardImgFail = function (img) {
    ============================================================ */
 
 function cardFaceHTML(card, opts = {}) {
+  const hasPitch = !!PITCH[card.pitch];
   const p = PITCH[card.pitch] || PITCH.red;
+  const pitchClass = hasPitch ? `pitch-${card.pitch}` : 'pitch-red';
   const compact = opts.compact ? ' compact' : '';
-  const key = normName(card.name);
+  const key = cardKey(card.name, card.pitch);
   const realname = escapeHtml(card.name);
-  const dataAttrs = `data-cardname="${escapeAttr(key)}" data-realname="${escapeAttr(card.name)}" data-pitch="${card.pitch}"`;
+  const dataAttrs = `data-cardkey="${escapeAttr(key)}" data-realname="${escapeAttr(card.name)}" data-pitch="${card.pitch || ''}"`;
   const entry = CardCache.get(key);
 
   // --- real card art ---
   if (entry && entry.state === 'done' && entry.image) {
     return `
-    <div class="card pitch-${card.pitch}${compact} has-art" ${dataAttrs}>
+    <div class="card ${pitchClass}${compact} has-art" ${dataAttrs}>
       <div class="card-art">
         <img src="${escapeAttr(entry.image)}" alt="${realname}" onerror="window.__cardImgFail(this)">
       </div>
@@ -321,15 +334,17 @@ function cardFaceHTML(card, opts = {}) {
   const costVal = (entry && entry.cost != null && entry.cost !== '') ? entry.cost
                   : (opts.cost != null ? opts.cost : null);
   const cost = (costVal != null) ? `<div class="card-cost">${escapeHtml(costVal)}</div>` : '';
+  const pips = hasPitch
+    ? `<div class="card-pip left">${p.value}</div><div class="card-pip right">${p.value}</div>`
+    : '';
   return `
-    <div class="card pitch-${card.pitch}${compact}" ${dataAttrs}>
+    <div class="card ${pitchClass}${compact}" ${dataAttrs}>
       <div class="card-art">
         <div class="tint"></div>
         ${kind ? `<div class="kind">${escapeHtml(kind)}</div>` : ''}
       </div>
       <div class="card-frame"></div>
-      <div class="card-pip left">${p.value}</div>
-      <div class="card-pip right">${p.value}</div>
+      ${pips}
       <div class="card-name">${realname}</div>
       ${cost}
     </div>`;
@@ -384,7 +399,10 @@ function renderImport(prefill = '', errorMsg = '') {
     <div class="setup-wrap screen">
       <div class="setup-head">
         <div class="diamond"><i></i></div>
-        <span class="brand-name">F.A.R.T.</span>
+        <div style="display:flex; flex-direction:column; gap:1px">
+          <span class="brand-name">F.A.R.T.</span>
+          <span class="brand-fullname">${APP_FULL_NAME}</span>
+        </div>
       </div>
 
       <div>
@@ -406,6 +424,8 @@ function renderImport(prefill = '', errorMsg = '') {
       <div class="setup-actions">
         <div class="btn btn-primary btn-lg" id="import-btn">Import <span style="font-size:16px">&rarr;</span></div>
       </div>
+
+      <div class="app-version">Flesh and Blood goldfishing sandbox · ${APP_VERSION}</div>
     </div>
   `);
 
@@ -418,7 +438,7 @@ function renderImport(prefill = '', errorMsg = '') {
     }
     State.hero = parsed.hero;
     State.intellect = intellectForHero(parsed.hero);
-    State.reviewDeck = parsed.deck;
+    State.reviewDeck = parsed.deck.map(r => ({ ...r, orig: r.qty })); // remember imported count for the +/- stepper
     State.equipment = parsed.equipment;
     prefetchDeck();   // warm card data + art now, while the user reviews the deck
     renderReview();
@@ -429,11 +449,13 @@ function renderImport(prefill = '', errorMsg = '') {
 function prefetchDeck() {
   const seen = new Set();
   for (const row of State.reviewDeck) {
-    const key = normName(row.name);
+    const key = cardKey(row.name, row.pitch);
     if (seen.has(key)) continue;
     seen.add(key);
-    resolveCard(row.name);   // fire-and-forget: caches data and preloads the image
+    resolveCard(row.name, row.pitch);   // fire-and-forget: caches data and preloads the image
   }
+  if (State.hero) resolveCard(State.hero, null);            // hero card art
+  for (const e of State.equipment) resolveCard(e.name, null); // equipment art
 }
 
 /* ---------- Review screen ---------- */
@@ -445,13 +467,16 @@ function renderReview() {
   const heroName = State.hero || 'Unknown hero';
   const rows = State.reviewDeck.map((r, i) => {
     const dot = (PITCH[r.pitch] || PITCH.red).dot;
+    const orig = (r.orig != null) ? r.orig : r.qty;
+    const zero = r.qty <= 0 ? ' zero' : '';
     return `
-      <div class="deck-row">
+      <div class="deck-row${zero}">
         <span class="swatch" style="background:${dot}; box-shadow:0 0 8px -1px ${dot}"></span>
         <span class="nm">${escapeHtml(r.name)}</span>
         <div class="qctrls">
-          <div class="minus" data-i="${i}">&ndash;</div>
+          <button class="minus" data-i="${i}" ${r.qty <= 0 ? 'disabled' : ''}>&ndash;</button>
           <span class="qty">&times;${r.qty}</span>
+          <button class="plus" data-i="${i}" ${r.qty >= orig ? 'disabled' : ''}>+</button>
         </div>
       </div>`;
   }).join('');
@@ -529,11 +554,18 @@ function renderReview() {
 
   document.querySelectorAll('#deck-rows .minus').forEach(btn => {
     btn.onclick = () => {
-      const i = parseInt(btn.dataset.i, 10);
-      const row = State.reviewDeck[i];
+      const row = State.reviewDeck[parseInt(btn.dataset.i, 10)];
       if (!row) return;
-      row.qty -= 1;
-      if (row.qty <= 0) State.reviewDeck.splice(i, 1);
+      row.qty = Math.max(0, row.qty - 1);   // keep the row at 0 so it can be brought back
+      renderReview();
+    };
+  });
+  document.querySelectorAll('#deck-rows .plus').forEach(btn => {
+    btn.onclick = () => {
+      const row = State.reviewDeck[parseInt(btn.dataset.i, 10)];
+      if (!row) return;
+      const orig = (row.orig != null) ? row.orig : row.qty;
+      row.qty = Math.min(orig, row.qty + 1);
       renderReview();
     };
   });
@@ -635,7 +667,7 @@ function renderPlayDesktop() {
           <div class="stat"><span class="k">Hand</span><span class="v" id="hand-v">${State.hand.length}</span></div>
           ${stagedPillHTML()}
           <div class="divider-v"></div>
-          <div class="btn" id="peek-btn">Peek Deck</div>
+          <div class="btn" id="hero-btn">Hero &amp; Gear</div>
           <div class="btn" id="reset-btn">Reset</div>
           <div class="btn btn-outline" id="endturn-btn">End Turn &uarr;</div>
           <div class="btn btn-primary" id="draw-btn">Draw</div>
@@ -692,6 +724,7 @@ function wirePlayHandlers() {
   on('peek-btn', togglePeek);
   on('peek-order-btn', togglePeek);          // desktop only
   on('deck-chip', togglePeek);               // mobile: tap deck pile to peek
+  on('hero-btn', openInfoViewer);            // view hero + equipment cards
 
   // --- hand: tap a card to zoom + act on it ---
   document.querySelectorAll('#hand .slot').forEach(slot => {
@@ -775,7 +808,7 @@ function renderPlayMobile() {
         <div class="btn btn-primary" id="draw-btn" style="flex:1.4">Draw</div>
         <div class="btn btn-outline" id="endturn-btn" style="flex:1.2">End Turn</div>
         <div class="btn" id="reset-btn" style="flex:1">Reset</div>
-        <div class="btn" id="peek-btn" style="flex:1">Peek</div>
+        <div class="btn" id="hero-btn" style="flex:1">Hero</div>
       </div>
     </div>
   `);
@@ -1073,6 +1106,49 @@ function openZoneViewer(zone) {
   hydrateVisibleCards();
 }
 
+/* ---------- hero + equipment viewer (reference only) ---------- */
+function closeInfoViewer() {
+  const e = document.getElementById('info-viewer');
+  if (e) e.remove();
+}
+function openInfoViewer() {
+  closeInfoViewer();
+  const group = (label, cards) => cards
+    ? `<div class="iv-group"><span class="iv-label">${label}</span><div class="zv-grid">${cards}</div></div>` : '';
+  const heroCards = State.hero
+    ? `<div class="zv-card" data-iv-name="${escapeAttr(State.hero)}">${cardFaceHTML({ name: State.hero, pitch: null }, {})}</div>` : '';
+  const equipCards = State.equipment.map(e =>
+    `<div class="zv-card" data-iv-name="${escapeAttr(e.name)}">${cardFaceHTML({ name: e.name, pitch: null }, {})}</div>`).join('');
+  const body = (heroCards || equipCards)
+    ? group('Hero', heroCards) + group('Equipment &amp; weapons', equipCards)
+    : '<div class="ps-empty">No hero or equipment found in this deck.</div>';
+
+  const el = document.createElement('div');
+  el.id = 'info-viewer';
+  el.className = 'sheet';
+  el.innerHTML = `
+    <div class="sheet-scrim" id="iv-scrim"></div>
+    <div class="sheet-panel">
+      <div class="sheet-grip"></div>
+      <div class="sheet-head">
+        <div>
+          <div class="sheet-title">HERO &amp; GEAR</div>
+          <div class="sheet-sub">reference only · tap a card to enlarge</div>
+        </div>
+        <div class="zv-close" id="iv-close">&times;</div>
+      </div>
+      <div class="sheet-body">${body}</div>
+    </div>`;
+  document.body.appendChild(el);
+
+  document.getElementById('iv-scrim').onclick = closeInfoViewer;
+  document.getElementById('iv-close').onclick = closeInfoViewer;
+  el.querySelectorAll('.zv-card[data-iv-name]').forEach(c => {
+    c.addEventListener('click', () => showCardZoom({ name: c.dataset.ivName, pitch: null }, 'info'));
+  });
+  hydrateVisibleCards();
+}
+
 /* ---------- Peek panel ---------- */
 let peekOpen = false;
 function togglePeek() {
@@ -1118,32 +1194,66 @@ function playFart() {
     const ctx = _fartCtx;
     if (ctx.state === 'suspended') ctx.resume();
     const now = ctx.currentTime;
-    const dur = 0.42 + Math.random() * 0.18;
-    const osc = ctx.createOscillator();
-    osc.type = 'sawtooth';
-    osc.frequency.setValueAtTime(150 + Math.random() * 40, now);
-    osc.frequency.exponentialRampToValueAtTime(60, now + dur);
-    // square LFO on the frequency makes the sputter
-    const lfo = ctx.createOscillator();
-    lfo.type = 'square';
-    lfo.frequency.setValueAtTime(16, now);
-    lfo.frequency.linearRampToValueAtTime(34, now + dur);
-    const lfoGain = ctx.createGain();
-    lfoGain.gain.value = 45;
-    lfo.connect(lfoGain).connect(osc.frequency);
-    // lowpass softens the buzz over time
+
+    // pick a personality each time so it never gets old: 0=long brap, 1=squeaker, 2=bubbly
+    const style = Math.floor(Math.random() * 3);
+    const dur = style === 1 ? 0.22 + Math.random() * 0.12 : 0.5 + Math.random() * 0.45;
+    const f0 = (style === 1 ? 210 : 120) + Math.random() * 60;
+    const fEnd = 42 + Math.random() * 26;
+
+    const master = ctx.createGain();
     const lp = ctx.createBiquadFilter();
-    lp.type = 'lowpass';
-    lp.frequency.setValueAtTime(1100, now);
-    lp.frequency.exponentialRampToValueAtTime(400, now + dur);
-    // amplitude envelope
-    const g = ctx.createGain();
-    g.gain.setValueAtTime(0.0001, now);
-    g.gain.exponentialRampToValueAtTime(0.55, now + 0.04);
-    g.gain.exponentialRampToValueAtTime(0.0001, now + dur);
-    osc.connect(lp).connect(g).connect(ctx.destination);
-    osc.start(now); lfo.start(now);
-    osc.stop(now + dur); lfo.stop(now + dur);
+    lp.type = 'lowpass'; lp.Q.value = 6;
+    lp.frequency.setValueAtTime(1200, now);
+    lp.frequency.exponentialRampToValueAtTime(340, now + dur);
+    lp.connect(master).connect(ctx.destination);
+
+    // two detuned sawtooths = thicker, ruder tone, with a square LFO sputter
+    [0, 8].forEach((detune, idx) => {
+      const osc = ctx.createOscillator();
+      osc.type = 'sawtooth'; osc.detune.value = detune;
+      osc.frequency.setValueAtTime(f0, now);
+      osc.frequency.exponentialRampToValueAtTime(fEnd, now + dur);
+      const lfo = ctx.createOscillator();
+      lfo.type = 'square';
+      lfo.frequency.setValueAtTime(12 + Math.random() * 8, now);
+      lfo.frequency.linearRampToValueAtTime(32 + Math.random() * 18, now + dur);
+      const lfoGain = ctx.createGain();
+      lfoGain.gain.value = 35 + Math.random() * 30;
+      lfo.connect(lfoGain).connect(osc.frequency);
+      const g = ctx.createGain();
+      g.gain.value = idx === 0 ? 0.5 : 0.3;
+      osc.connect(g).connect(lp);
+      osc.start(now); osc.stop(now + dur);
+      lfo.start(now); lfo.stop(now + dur);
+    });
+
+    // amplitude envelope — wobble it for the bubbly ones
+    const env = master.gain;
+    env.setValueAtTime(0.0001, now);
+    env.exponentialRampToValueAtTime(0.6, now + 0.03);
+    if (style === 2) {
+      const steps = 4 + Math.floor(Math.random() * 4);
+      for (let i = 1; i <= steps; i++) {
+        env.exponentialRampToValueAtTime(0.18 + Math.random() * 0.4, now + dur * i / (steps + 1));
+      }
+    }
+    env.exponentialRampToValueAtTime(0.0001, now + dur);
+
+    // occasional squeaky tail (always for the squeaker)
+    if (style === 1 || Math.random() < 0.4) {
+      const sq = ctx.createOscillator();
+      sq.type = 'sine';
+      const ts = now + dur * 0.76;
+      sq.frequency.setValueAtTime(300, ts);
+      sq.frequency.exponentialRampToValueAtTime(820 + Math.random() * 520, ts + 0.12);
+      const sg = ctx.createGain();
+      sg.gain.setValueAtTime(0.0001, ts);
+      sg.gain.exponentialRampToValueAtTime(0.22, ts + 0.02);
+      sg.gain.exponentialRampToValueAtTime(0.0001, ts + 0.15);
+      sq.connect(sg).connect(ctx.destination);
+      sq.start(ts); sq.stop(ts + 0.18);
+    }
   } catch (_) {}
 }
 function spawnGasPuff(anchor) {
@@ -1183,5 +1293,5 @@ window.addEventListener('resize', () => {
   const m = isMobile();
   if (m === _wasMobile) return;
   _wasMobile = m;
-  if (State.started) { closePitchSheet(); closeZoneViewer(); closeCardZoom(); renderPlay(); }
+  if (State.started) { closePitchSheet(); closeZoneViewer(); closeInfoViewer(); closeCardZoom(); renderPlay(); }
 });

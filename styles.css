@@ -31,6 +31,8 @@
 html, body {
   margin: 0;
   height: 100%;
+  /* solid dark base so overscroll / area below content never flashes white */
+  background-color: #0d0905;
 }
 
 body {
@@ -331,6 +333,14 @@ body::before {
   color: var(--muted-2);
   margin-top: 5px;
 }
+.brand-fullname {
+  font: 600 8.5px var(--font-mono); letter-spacing: 2px; text-transform: uppercase;
+  color: var(--muted-2);
+}
+.app-version {
+  margin-top: 18px; text-align: center;
+  font: 500 10.5px var(--font-mono); letter-spacing: 0.5px; color: var(--muted-3);
+}
 
 .paste-box {
   position: relative;
@@ -466,16 +476,20 @@ textarea.paste::placeholder {
   font-family: var(--font-serif); font-weight: 700; font-size: 18px;
   color: #ece2cd; flex: 1; min-width: 0; line-height: 1.1;
 }
-.deck-row .qctrls { display: flex; align-items: center; gap: 9px; flex-shrink: 0; }
-.deck-row .minus {
-  width: 28px; height: 28px; border-radius: 8px;
+.deck-row .qctrls { display: flex; align-items: center; gap: 7px; flex-shrink: 0; }
+.deck-row .minus, .deck-row .plus {
+  width: 28px; height: 28px; border-radius: 8px; padding: 0;
   border: 1px solid rgba(201, 166, 107, 0.4);
   background: rgba(0, 0, 0, 0.25);
   display: flex; align-items: center; justify-content: center;
   font: 700 17px var(--font-sans); color: #cdbf9c; cursor: pointer;
 }
-.deck-row .minus:hover { background: rgba(201,166,107,0.12); }
+.deck-row .minus:hover:not([disabled]), .deck-row .plus:hover:not([disabled]) { background: rgba(201,166,107,0.12); }
+.deck-row .minus[disabled], .deck-row .plus[disabled] { opacity: 0.28; cursor: default; }
 .deck-row .qty { min-width: 30px; text-align: center; font: 700 16px var(--font-sans); color: var(--ink-bright); }
+/* a card trimmed to zero stays visible (dimmed) so it can be brought back */
+.deck-row.zero { opacity: 0.4; }
+.deck-row.zero .nm { text-decoration: line-through; }
 
 .equip-box {
   margin-top: 14px; padding: 13px 13px 6px;
@@ -665,10 +679,11 @@ textarea.paste::placeholder {
 .card-zoom .cz-btn {
   display: flex; flex-direction: column; align-items: center; gap: 1px;
   padding: 10px 16px; border-radius: 11px; cursor: pointer;
-  background: rgba(232, 221, 200, 0.06); border: 1px solid var(--accent-soft);
-  color: var(--ink); font: 600 13px var(--font-sans);
+  background: linear-gradient(180deg, #241b10, #17110a); border: 1px solid rgba(201, 166, 107, 0.5);
+  color: var(--ink-head); font: 600 13px var(--font-sans);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.5);
 }
-.card-zoom .cz-btn:hover { background: rgba(201, 166, 107, 0.16); }
+.card-zoom .cz-btn:hover { background: linear-gradient(180deg, #2e2415, #1c150c); border-color: var(--accent); }
 .card-zoom .cz-btn:active { transform: translateY(1px); }
 .card-zoom .cz-sub { font: 500 9.5px var(--font-mono); color: var(--muted-2); }
 .card-zoom .cz-hint { font: 500 11px var(--font-mono); letter-spacing: 1px; color: var(--muted-3); text-transform: uppercase; }
@@ -930,6 +945,11 @@ textarea.paste::placeholder {
   color: var(--muted); cursor: pointer; font-size: 16px;
 }
 .zv-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 12px; }
+.iv-group { margin-bottom: 16px; }
+.iv-label {
+  display: block; margin-bottom: 9px;
+  font: 600 11px var(--font-mono); letter-spacing: 2px; text-transform: uppercase; color: var(--muted);
+}
 .zv-card { width: 100%; cursor: pointer; transition: transform .15s ease; }
 .zv-card:hover { transform: translateY(-4px); }
 @media (max-width: 760px) { .zv-grid { grid-template-columns: repeat(auto-fill, minmax(86px, 1fr)); gap: 10px; } }
