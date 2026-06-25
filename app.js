@@ -244,6 +244,7 @@ function resolveCard(name) {
         entry.cost = found.cost;
         entry.type = found.type;
         entry.state = 'done';
+        if (entry.image) { const im = new Image(); im.src = entry.image; } // warm the browser image cache
       } else {
         entry.state = 'none';
       }
@@ -419,8 +420,20 @@ function renderImport(prefill = '', errorMsg = '') {
     State.intellect = intellectForHero(parsed.hero);
     State.reviewDeck = parsed.deck;
     State.equipment = parsed.equipment;
+    prefetchDeck();   // warm card data + art now, while the user reviews the deck
     renderReview();
   };
+}
+
+/** Resolve every unique deck card's data + image up front so the session is fast. */
+function prefetchDeck() {
+  const seen = new Set();
+  for (const row of State.reviewDeck) {
+    const key = normName(row.name);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    resolveCard(row.name);   // fire-and-forget: caches data and preloads the image
+  }
 }
 
 /* ---------- Review screen ---------- */
@@ -669,9 +682,10 @@ function wirePlayHandlers() {
     renderPlay();
     toast('Reshuffled · new opening hand');
   });
-  // End Turn: only open the pitch popup if cards are staged; otherwise just draw up
+  // End Turn: only show the pitch-order popup when there are 2+ cards to order;
+  // with 0 or 1 staged there's nothing to arrange, so just commit + draw up.
   on('endturn-btn', () => {
-    if (State.pitch.length) openPitchPopup({ endTurn: true });
+    if (State.pitch.length > 1) openPitchPopup({ endTurn: true });
     else finishTurnWithPitch();
   });
   on('staged-pill', () => openPitchPopup({ endTurn: false }));  // review/reorder mid-turn
@@ -774,18 +788,26 @@ function handCardById(id) {
   return State.hand.find(c => String(c.id) === String(id));
 }
 
+let menuCardId = null;
 function closeCardMenu() {
   const m = document.getElementById('card-menu');
   if (m) m.remove();
-  document.removeEventListener('mousedown', onDocDownForMenu, true);
+  menuCardId = null;
+  document.removeEventListener('click', onDocClickForMenu, true);
 }
-function onDocDownForMenu(e) {
-  const m = document.getElementById('card-menu');
-  if (m && !m.contains(e.target)) closeCardMenu();
+function onDocClickForMenu(e) {
+  if (e.target.closest('.card-menu')) return;  // clicks inside the menu
+  if (e.target.closest('[data-id]')) return;   // clicks on a card — its own handler toggles
+  closeCardMenu();
 }
 function showCardMenu(card, anchorEl, zone) {
+  if (!card) { closeCardMenu(); return; }
+  // clicking the same card again hides the menu (toggle)
+  if (document.getElementById('card-menu') && menuCardId === String(card.id)) {
+    closeCardMenu();
+    return;
+  }
   closeCardMenu();
-  if (!card) return;
   const items = [];
   if (zone === 'hand') {
     items.push({ label: 'Pitch', sub: 'stage → bottom of deck', on: () => pitchCard(card.id, 'hand') });
@@ -827,10 +849,11 @@ function showCardMenu(card, anchorEl, zone) {
   m.style.left = left + 'px';
   m.style.top = top + 'px';
 
+  menuCardId = String(card.id);
   m.querySelectorAll('.cm-item').forEach(btn => {
     btn.onclick = () => { const it = items[+btn.dataset.idx]; closeCardMenu(); it.on(); };
   });
-  setTimeout(() => document.addEventListener('mousedown', onDocDownForMenu, true), 0);
+  setTimeout(() => document.addEventListener('click', onDocClickForMenu, true), 0);
 }
 
 /** Move a card from one zone array to the end of another, then re-render. */

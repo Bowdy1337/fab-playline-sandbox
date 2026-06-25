@@ -799,13 +799,16 @@ textarea.paste::placeholder {
 .m-hand-grid .slot { width: 100%; max-width: 170px; }
 
 .m-actionbar {
-  flex-shrink: 0;
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 25;
   display: flex; gap: 8px;
   padding: 9px 14px calc(18px + env(safe-area-inset-bottom));
-  background: linear-gradient(0deg, rgba(8, 5, 3, 0.9), transparent);
-  border-top: 1px solid rgba(201, 166, 107, 0.12);
+  /* opaque so scrolling content never shows through */
+  background: linear-gradient(0deg, #0c0805 62%, rgba(12, 8, 5, 0.92));
+  border-top: 1px solid rgba(201, 166, 107, 0.18);
 }
 .m-actionbar .btn { padding: 13px 6px; border-radius: 12px; }
+/* leave room so the fixed bar never covers the last scrolled content */
+.play.mobile .m-scroll { padding-bottom: calc(78px + env(safe-area-inset-bottom)); }
 
 /* peek panel becomes a bottom sheet on mobile */
 @media (max-width: 760px) {
