@@ -693,22 +693,22 @@ function wirePlayHandlers() {
   on('peek-order-btn', togglePeek);          // desktop only
   on('deck-chip', togglePeek);               // mobile: tap deck pile to peek
 
-  // --- hand: click a card to open its action menu ---
+  // --- hand: tap a card to zoom + act on it ---
   document.querySelectorAll('#hand .slot').forEach(slot => {
-    slot.addEventListener('click', () => showCardMenu(handCardById(slot.dataset.id), slot, 'hand'));
+    slot.addEventListener('click', () => showCardZoom(handCardById(slot.dataset.id), 'hand'));
   });
 
-  // --- arsenal: click a card to act on it ---
+  // --- arsenal: tap a card to zoom + act ---
   document.querySelectorAll('.arsenal-frame[data-id]').forEach(el => {
-    el.addEventListener('click', () => showCardMenu(zoneCardById('arsenal', el.dataset.id), el, 'arsenal'));
+    el.addEventListener('click', () => showCardZoom(zoneCardById('arsenal', el.dataset.id), 'arsenal'));
   });
-  // --- arsenal pile chip (mobile): act on the set-aside card ---
+  // --- arsenal pile chip (mobile): zoom the set-aside card ---
   document.querySelectorAll('[data-zoneclick]').forEach(el => {
     el.addEventListener('click', () => {
       const zone = el.dataset.zoneclick;
       const arr = State[zone];
       if (!arr.length) return;
-      showCardMenu(arr[arr.length - 1], el, zone);
+      showCardZoom(arr[arr.length - 1], zone);
     });
   });
   // --- graveyard / banished: open the full-zone viewer ---
@@ -788,35 +788,17 @@ function handCardById(id) {
   return State.hand.find(c => String(c.id) === String(id));
 }
 
-let menuCardId = null;
-function closeCardMenu() {
-  const m = document.getElementById('card-menu');
-  if (m) m.remove();
-  menuCardId = null;
-  document.removeEventListener('click', onDocClickForMenu, true);
-}
-function onDocClickForMenu(e) {
-  if (e.target.closest('.card-menu')) return;  // clicks inside the menu
-  if (e.target.closest('[data-id]')) return;   // clicks on a card — its own handler toggles
-  closeCardMenu();
-}
-function showCardMenu(card, anchorEl, zone) {
-  if (!card) { closeCardMenu(); return; }
-  // clicking the same card again hides the menu (toggle)
-  if (document.getElementById('card-menu') && menuCardId === String(card.id)) {
-    closeCardMenu();
-    return;
-  }
-  closeCardMenu();
+/** The actions available for a card depending on which zone it's in. */
+function cardActionItems(card, zone) {
   const items = [];
   if (zone === 'hand') {
     items.push({ label: 'Pitch', sub: 'stage → bottom of deck', on: () => pitchCard(card.id, 'hand') });
     items.push({ label: 'Play / Discard', sub: '→ graveyard', on: () => discardCard(card.id, 'hand') });
-    items.push({ label: 'Arsenal', sub: 'set aside for later', on: () => arsenalCard(card.id, 'hand') });
+    items.push({ label: 'Arsenal', sub: 'set aside', on: () => arsenalCard(card.id, 'hand') });
     items.push({ label: 'Banish', sub: 'remove from play', on: () => banishCard(card.id, 'hand') });
   } else if (zone === 'arsenal') {
     items.push({ label: 'Play / Discard', sub: '→ graveyard', on: () => discardCard(card.id, 'arsenal') });
-    items.push({ label: 'Pitch', sub: 'stage → bottom of deck', on: () => pitchCard(card.id, 'arsenal') });
+    items.push({ label: 'Pitch', sub: 'stage → bottom', on: () => pitchCard(card.id, 'arsenal') });
     items.push({ label: 'Return to hand', on: () => returnToHand(card.id, 'arsenal') });
     items.push({ label: 'Banish', sub: 'remove from play', on: () => banishCard(card.id, 'arsenal') });
   } else if (zone === 'graveyard') {
@@ -826,34 +808,44 @@ function showCardMenu(card, anchorEl, zone) {
     items.push({ label: 'Return to hand', on: () => returnToHand(card.id, 'banished') });
     items.push({ label: 'To graveyard', on: () => discardCard(card.id, 'banished') });
   }
-  if (!items.length) return;
+  return items;
+}
 
-  const m = document.createElement('div');
-  m.id = 'card-menu';
-  m.className = 'card-menu';
-  m.innerHTML =
-    `<div class="cm-head">
-       <span class="cm-name">${escapeHtml(card.name)}</span>
-       <span class="cm-pitch pitch-${card.pitch}">${PITCH[card.pitch] ? PITCH[card.pitch].value : ''}</span>
-     </div>` +
-    items.map((it, idx) =>
-      `<button class="cm-item" data-idx="${idx}">${escapeHtml(it.label)}${it.sub ? `<span class="cm-sub">${escapeHtml(it.sub)}</span>` : ''}</button>`
-    ).join('');
-  document.body.appendChild(m);
+function closeCardZoom() {
+  const z = document.getElementById('card-zoom');
+  if (z) z.remove();
+}
 
-  const r = anchorEl.getBoundingClientRect();
-  let left = r.left + r.width / 2 - 90;
-  let top = r.top - 10 - m.offsetHeight;
-  if (top < 10) top = r.bottom + 10;
-  left = Math.max(10, Math.min(left, window.innerWidth - 190));
-  m.style.left = left + 'px';
-  m.style.top = top + 'px';
+/** Tap a card → big readable version + its actions. Tap anywhere (not a button) to dismiss. */
+function showCardZoom(card, zone) {
+  closeCardZoom();
+  if (!card) return;
+  const items = cardActionItems(card, zone);
+  const pv = PITCH[card.pitch] ? PITCH[card.pitch].value : '';
+  const actions = items.length
+    ? `<div class="cz-actions">${items.map((it, i) =>
+        `<button class="cz-btn" data-idx="${i}">${escapeHtml(it.label)}${it.sub ? `<span class="cz-sub">${escapeHtml(it.sub)}</span>` : ''}</button>`
+      ).join('')}</div>`
+    : '';
 
-  menuCardId = String(card.id);
-  m.querySelectorAll('.cm-item').forEach(btn => {
-    btn.onclick = () => { const it = items[+btn.dataset.idx]; closeCardMenu(); it.on(); };
+  const el = document.createElement('div');
+  el.id = 'card-zoom';
+  el.className = 'card-zoom';
+  el.innerHTML = `
+    <div class="cz-inner">
+      <div class="cz-meta"><span class="cz-name">${escapeHtml(card.name)}</span><span class="cz-pitch pitch-${card.pitch}">${pv}</span></div>
+      <div class="cz-card">${cardFaceHTML(card, {})}</div>
+      ${actions}
+      <div class="cz-hint">tap anywhere to close</div>
+    </div>`;
+  document.body.appendChild(el);
+
+  // tap anywhere except an action button closes the zoom
+  el.addEventListener('click', (e) => { if (!e.target.closest('.cz-btn')) closeCardZoom(); });
+  el.querySelectorAll('.cz-btn').forEach(btn => {
+    btn.onclick = (e) => { e.stopPropagation(); const it = items[+btn.dataset.idx]; closeCardZoom(); it.on(); };
   });
-  setTimeout(() => document.addEventListener('click', onDocClickForMenu, true), 0);
+  hydrateVisibleCards();
 }
 
 /** Move a card from one zone array to the end of another, then re-render. */
@@ -1066,7 +1058,7 @@ function openZoneViewer(zone) {
   document.getElementById('zv-scrim').onclick = closeZoneViewer;
   document.getElementById('zv-close').onclick = closeZoneViewer;
   el.querySelectorAll('.zv-card').forEach(cardEl => {
-    cardEl.addEventListener('click', () => showCardMenu(zoneCardById(zone, cardEl.dataset.id), cardEl, zone));
+    cardEl.addEventListener('click', () => showCardZoom(zoneCardById(zone, cardEl.dataset.id), zone));
   });
   hydrateVisibleCards();
 }
@@ -1106,8 +1098,74 @@ function togglePeek() {
   document.getElementById('peek-close').onclick = togglePeek;
 }
 
+/* ---------- easter egg: click the F.A.R.T. logo for a puff of gas + a brap ---------- */
+let _fartCtx = null;
+function playFart() {
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    _fartCtx = _fartCtx || new AC();
+    const ctx = _fartCtx;
+    if (ctx.state === 'suspended') ctx.resume();
+    const now = ctx.currentTime;
+    const dur = 0.42 + Math.random() * 0.18;
+    const osc = ctx.createOscillator();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(150 + Math.random() * 40, now);
+    osc.frequency.exponentialRampToValueAtTime(60, now + dur);
+    // square LFO on the frequency makes the sputter
+    const lfo = ctx.createOscillator();
+    lfo.type = 'square';
+    lfo.frequency.setValueAtTime(16, now);
+    lfo.frequency.linearRampToValueAtTime(34, now + dur);
+    const lfoGain = ctx.createGain();
+    lfoGain.gain.value = 45;
+    lfo.connect(lfoGain).connect(osc.frequency);
+    // lowpass softens the buzz over time
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.setValueAtTime(1100, now);
+    lp.frequency.exponentialRampToValueAtTime(400, now + dur);
+    // amplitude envelope
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, now);
+    g.gain.exponentialRampToValueAtTime(0.55, now + 0.04);
+    g.gain.exponentialRampToValueAtTime(0.0001, now + dur);
+    osc.connect(lp).connect(g).connect(ctx.destination);
+    osc.start(now); lfo.start(now);
+    osc.stop(now + dur); lfo.stop(now + dur);
+  } catch (_) {}
+}
+function spawnGasPuff(anchor) {
+  const r = anchor.getBoundingClientRect();
+  const cont = document.createElement('div');
+  cont.className = 'gas-burst';
+  cont.style.left = (r.left + r.width / 2) + 'px';
+  cont.style.top = (r.top + r.height / 2) + 'px';
+  for (let i = 0; i < 7; i++) {
+    const p = document.createElement('span');
+    p.className = 'gas-puff';
+    const ang = (-90 + (Math.random() * 110 - 55)) * Math.PI / 180; // spread upward
+    const dist = 26 + Math.random() * 50;
+    p.style.setProperty('--dx', (Math.cos(ang) * dist).toFixed(1) + 'px');
+    p.style.setProperty('--dy', (Math.sin(ang) * dist).toFixed(1) + 'px');
+    p.style.setProperty('--s', (0.7 + Math.random() * 0.9).toFixed(2));
+    p.style.animationDelay = Math.round(Math.random() * 90) + 'ms';
+    cont.appendChild(p);
+  }
+  document.body.appendChild(cont);
+  setTimeout(() => cont.remove(), 1200);
+}
+function fartEasterEgg(anchor) { playFart(); spawnGasPuff(anchor); }
+
 /* ---------- boot ---------- */
 window.addEventListener('DOMContentLoaded', () => renderImport());
+
+// the logo (diamond + wordmark) is the easter-egg trigger on every screen
+document.addEventListener('click', (e) => {
+  const logo = e.target.closest('.brand-name, .diamond');
+  if (logo) fartEasterEgg(logo);
+});
 
 // re-render the play screen when crossing the mobile/desktop breakpoint
 let _wasMobile = isMobile();
@@ -1115,5 +1173,5 @@ window.addEventListener('resize', () => {
   const m = isMobile();
   if (m === _wasMobile) return;
   _wasMobile = m;
-  if (State.started) { closePitchSheet(); closeZoneViewer(); renderPlay(); }
+  if (State.started) { closePitchSheet(); closeZoneViewer(); closeCardZoom(); renderPlay(); }
 });
