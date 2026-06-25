@@ -878,7 +878,17 @@ function discardCard(id, fromZone = 'hand') {
   const c = moveCard(id, fromZone, 'graveyard');
   if (c) toast(`${c.name} → graveyard`);
 }
+const ARSENAL_FULL_QUIPS = [
+  'bro what are you doing? 🤨 arsenal holds 1',
+  'one at a time, champ — arsenal is full',
+  'easy there, the arsenal fits a single card',
+  'nice try. arsenal = 1 card. them’s the rules',
+];
 function arsenalCard(id, fromZone = 'hand') {
+  if (State.arsenal.length >= 1) {
+    toast(ARSENAL_FULL_QUIPS[Math.floor(Math.random() * ARSENAL_FULL_QUIPS.length)]);
+    return;
+  }
   const c = moveCard(id, fromZone, 'arsenal');
   if (c) toast(`${c.name} → arsenal`);
 }
