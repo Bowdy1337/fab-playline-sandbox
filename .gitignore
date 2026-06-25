@@ -1,0 +1,6 @@
+# local dev only — not needed for the static deploy
+.claude/
+# source handoff + spec (not part of the app)
+handoff/
+*.zip
+fab-playline-sandbox-spec.md
