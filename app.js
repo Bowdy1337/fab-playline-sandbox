@@ -9,7 +9,7 @@
 'use strict';
 
 /* Bump on each deploy so the import screen shows when an update landed. */
-const APP_VERSION = 'v1.4.1';
+const APP_VERSION = 'v1.4.2';
 const APP_FULL_NAME = 'Faux Again Repetition Tool';
 
 /* ---------- pitch colors / values ---------- */
@@ -504,7 +504,7 @@ function renderImport(prefill = '', errorMsg = '') {
       <div class="paste-box">
         <div class="paste-label"><span class="dot"></span><span>Deck list</span></div>
         <textarea class="paste" id="paste" spellcheck="false"
-          placeholder="paste your deck link from fabrary">${escapeHtml(prefill)}</textarea>
+          placeholder="Paste your deck list from Fabrary. (Or just the URL — you're welcome, Jimmy 🫡)">${escapeHtml(prefill)}</textarea>
       </div>
 
       <div class="helper ${errorMsg ? 'error' : ''}">
