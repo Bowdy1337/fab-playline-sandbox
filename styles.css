@@ -424,6 +424,7 @@ textarea.paste::placeholder {
 }
 .hero-band .hero-sub { font: 500 11px var(--font-sans); color: var(--muted-2); }
 
+.hero-steppers { flex-shrink: 0; display: flex; gap: 12px; }
 .intellect { flex-shrink: 0; display: flex; flex-direction: column; align-items: center; gap: 6px; }
 .intellect .lbl {
   font: 600 8.5px var(--font-mono); letter-spacing: 1.5px;
@@ -567,6 +568,26 @@ textarea.paste::placeholder {
 .rail.right { justify-content: center; align-items: center; gap: 24px; padding-top: 0; }
 .zone-pile { display: flex; flex-direction: column; align-items: center; gap: 7px; }
 .zone-pile .rail-label { margin-bottom: 0; }
+.deck-hint { font: 500 9px var(--font-mono); letter-spacing: 1px; text-transform: uppercase; color: var(--muted-3); }
+
+/* small anchored menu (deck options) */
+.mini-menu {
+  position: fixed; z-index: 60; width: 200px;
+  background: linear-gradient(180deg, rgba(26, 20, 13, 0.99), rgba(16, 11, 7, 0.99));
+  border: 1px solid rgba(201, 166, 107, 0.45);
+  border-radius: 12px; overflow: hidden;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.7);
+}
+.mini-menu .mm-item {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 1px;
+  width: 100%; text-align: left; padding: 11px 13px;
+  background: transparent; border: none; cursor: pointer;
+  border-bottom: 1px solid rgba(201, 166, 107, 0.12);
+}
+.mini-menu .mm-item:last-child { border-bottom: none; }
+.mini-menu .mm-item:hover { background: rgba(201, 166, 107, 0.12); }
+.mini-menu .mm-label { color: var(--ink-head); font: 600 13.5px var(--font-sans); }
+.mini-menu .mm-sub { color: var(--muted-2); font: 500 10px var(--font-mono); }
 
 /* "N staged" pill in the top bar */
 .staged-pill { border-color: var(--accent); color: var(--ink-head); }
@@ -673,12 +694,13 @@ textarea.paste::placeholder {
 }
 @keyframes czPop { from { transform: scale(.82); opacity: .4; } to { transform: scale(1); opacity: 1; } }
 .card-zoom .cz-actions {
-  display: flex; flex-wrap: wrap; gap: 9px; justify-content: center;
-  max-width: min(420px, 90vw);
+  display: flex; flex-wrap: nowrap; gap: 8px; justify-content: center;
+  width: min(360px, 78vw);
 }
 .card-zoom .cz-btn {
+  flex: 1 1 0; min-width: 0;
   display: flex; flex-direction: column; align-items: center; gap: 1px;
-  padding: 10px 16px; border-radius: 11px; cursor: pointer;
+  padding: 11px 6px; border-radius: 11px; cursor: pointer;
   background: linear-gradient(180deg, #241b10, #17110a); border: 1px solid rgba(201, 166, 107, 0.5);
   color: var(--ink-head); font: 600 13px var(--font-sans);
   box-shadow: 0 6px 16px rgba(0, 0, 0, 0.5);
@@ -859,7 +881,7 @@ textarea.paste::placeholder {
   background: linear-gradient(0deg, #0c0805 62%, rgba(12, 8, 5, 0.92));
   border-top: 1px solid rgba(201, 166, 107, 0.18);
 }
-.m-actionbar .btn { padding: 13px 6px; border-radius: 12px; }
+.m-actionbar .btn { padding: 16px 8px; border-radius: 12px; font-size: 14px; }
 /* leave room so the fixed bar never covers the last scrolled content */
 .play.mobile .m-scroll { padding-bottom: calc(78px + env(safe-area-inset-bottom)); }
 

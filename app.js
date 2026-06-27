@@ -9,7 +9,7 @@
 'use strict';
 
 /* Bump on each deploy so the import screen shows when an update landed. */
-const APP_VERSION = 'v1.2.0';
+const APP_VERSION = 'v1.3.0';
 const APP_FULL_NAME = 'Faux Again Repetition Tool';
 
 /* ---------- pitch colors / values ---------- */
@@ -134,6 +134,7 @@ function makeCard(name, pitch) {
 const State = {
   hero: '',
   intellect: DEFAULT_INTELLECT,
+  arsenalLimit: 1,            // how many cards may sit in the arsenal (user-adjustable)
   // review-stage editable list (name/pitch/qty) before the session starts:
   reviewDeck: [],
   equipment: [],
@@ -141,6 +142,7 @@ const State = {
   deck: [],
   hand: [],
   arsenal: [],
+  arena: [],                 // equipment / weapons in play (from the Arena cards)
   pitch: [],
   graveyard: [],
   banished: [],
@@ -171,6 +173,15 @@ function startSession() {
   State.pitch = [];
   State.graveyard = [];
   State.banished = [];
+  // equipment / weapons start in play (the arena), playable to the graveyard
+  State.arena = [];
+  for (const e of State.equipment) {
+    for (let i = 0; i < (e.qty || 1); i++) {
+      const c = makeCard(e.name, null);
+      c.equip = true;
+      State.arena.push(c);
+    }
+  }
   State.turn = 1;
   State.started = true;
   // draw opening hand to intellect
@@ -433,7 +444,11 @@ function renderImport(prefill = '', errorMsg = '') {
     const text = document.getElementById('paste').value;
     const parsed = parseDecklist(text);
     if (parsed.deck.length === 0) {
-      renderImport(text, 'No deck cards found. Make sure cards have a pitch tag like (red).');
+      if (/fabrary\.net/i.test(text)) {
+        renderImport(text, "That's a Fabrary link — it can't auto-import (Fabrary has no public deck API). In Fabrary, tap “⋯” → “Copy deck list”, and paste THAT here instead. You're welcome, Jimmy. 🫡");
+      } else {
+        renderImport(text, 'No deck cards found. Make sure cards have a pitch tag like (red).');
+      }
       return;
     }
     State.hero = parsed.hero;
@@ -508,14 +523,23 @@ function renderReview() {
           <span class="hero-name">${escapeHtml(heroName)}</span>
           <span class="hero-sub">Draw-up hand size from intellect</span>
         </div>
-        <div class="intellect">
-          <span class="lbl">Intellect</span>
-          <div class="stepper">
-            <button id="int-minus">&ndash;</button>
-            <div class="val" id="int-val">${State.intellect}</div>
-            <button id="int-plus">+</button>
+        <div class="hero-steppers">
+          <div class="intellect">
+            <span class="lbl">Intellect</span>
+            <div class="stepper">
+              <button id="int-minus">&ndash;</button>
+              <div class="val" id="int-val">${State.intellect}</div>
+              <button id="int-plus">+</button>
+            </div>
           </div>
-          <span class="cap">cards / hand</span>
+          <div class="intellect">
+            <span class="lbl">Arsenal</span>
+            <div class="stepper">
+              <button id="ars-minus">&ndash;</button>
+              <div class="val" id="ars-val">${State.arsenalLimit}</div>
+              <button id="ars-plus">+</button>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -545,6 +569,14 @@ function renderReview() {
   document.getElementById('int-plus').onclick = () => {
     State.intellect = Math.min(20, State.intellect + 1);
     document.getElementById('int-val').textContent = State.intellect;
+  };
+  document.getElementById('ars-minus').onclick = () => {
+    State.arsenalLimit = Math.max(1, State.arsenalLimit - 1);
+    document.getElementById('ars-val').textContent = State.arsenalLimit;
+  };
+  document.getElementById('ars-plus').onclick = () => {
+    State.arsenalLimit = Math.min(9, State.arsenalLimit + 1);
+    document.getElementById('ars-val').textContent = State.arsenalLimit;
   };
   document.getElementById('back-btn').onclick = () => renderImport();
   document.getElementById('start-btn').onclick = () => {
@@ -625,16 +657,13 @@ function zonePileHTML(zone, label, w) {
 function deckPileHTML() {
   return `<div class="zone-pile">
       <span class="rail-label">Deck</span>
-      <div class="pile" style="width:108px">
+      <div class="pile card-clickable" id="deck-trigger" data-deck-trigger style="width:108px">
         <div class="stack-shadow" style="left:8px; top:8px; width:108px; aspect-ratio:451/629"></div>
         <div class="stack-shadow" style="left:4px; top:4px; width:108px; aspect-ratio:451/629; background:#1b140c"></div>
         <div style="position:relative">${cardBackHTML('DECK')}</div>
         <div class="pile-count" id="deck-count">${State.deck.length}</div>
       </div>
-      <div class="btn" id="peek-order-btn" style="margin-top:8px">
-        <span style="width:7px;height:7px;border:1.5px solid var(--accent);transform:rotate(45deg);display:inline-block"></span>
-        Peek order
-      </div>
+      <span class="deck-hint">tap for options</span>
     </div>`;
 }
 function arsenalBlockHTML() {
@@ -669,8 +698,7 @@ function renderPlayDesktop() {
           <div class="divider-v"></div>
           <div class="btn" id="hero-btn">Hero &amp; Gear</div>
           <div class="btn" id="reset-btn">Reset</div>
-          <div class="btn btn-outline" id="endturn-btn">End Turn &uarr;</div>
-          <div class="btn btn-primary" id="draw-btn">Draw</div>
+          <div class="btn btn-primary" id="endturn-btn">End Turn &uarr;</div>
         </div>
       </div>
 
@@ -704,11 +732,6 @@ function renderPlayDesktop() {
 function wirePlayHandlers() {
   const on = (id, fn) => { const el = document.getElementById(id); if (el) el.onclick = fn; };
 
-  on('draw-btn', () => {
-    if (State.deck.length === 0) { toast('Deck is empty'); return; }
-    drawN(1);
-    renderPlay();
-  });
   on('reset-btn', () => {
     startSession();
     renderPlay();
@@ -721,10 +744,9 @@ function wirePlayHandlers() {
     else finishTurnWithPitch();
   });
   on('staged-pill', () => openPitchPopup({ endTurn: false }));  // review/reorder mid-turn
-  on('peek-btn', togglePeek);
-  on('peek-order-btn', togglePeek);          // desktop only
-  on('deck-chip', togglePeek);               // mobile: tap deck pile to peek
   on('hero-btn', openInfoViewer);            // view hero + equipment cards
+  const deckTrig = document.getElementById('deck-trigger');
+  if (deckTrig) deckTrig.onclick = () => showDeckMenu(deckTrig);   // Draw / Peek / Banish top
 
   // --- hand: tap a card to zoom + act on it ---
   document.querySelectorAll('#hand .slot').forEach(slot => {
@@ -766,7 +788,7 @@ function renderPlayMobile() {
   };
   // deck → peek; graveyard/banished → full-zone viewer; arsenal → act on set-aside card
   const chipAttr = (zone) =>
-    zone === 'deck' ? 'id="deck-chip"'
+    zone === 'deck' ? 'id="deck-trigger" data-deck-trigger'
     : (zone === 'graveyard' || zone === 'banished') ? `data-zoneview="${zone}"`
     : `data-zoneclick="${zone}"`;
   const pileChip = (zone, label, count, inner, extra = '') =>
@@ -805,8 +827,7 @@ function renderPlayMobile() {
       </div>
 
       <div class="m-actionbar">
-        <div class="btn btn-primary" id="draw-btn" style="flex:1.4">Draw</div>
-        <div class="btn btn-outline" id="endturn-btn" style="flex:1.2">End Turn</div>
+        <div class="btn btn-primary" id="endturn-btn" style="flex:1.6">End Turn &uarr;</div>
         <div class="btn" id="reset-btn" style="flex:1">Reset</div>
         <div class="btn" id="hero-btn" style="flex:1">Hero</div>
       </div>
@@ -825,20 +846,25 @@ function handCardById(id) {
 function cardActionItems(card, zone) {
   const items = [];
   if (zone === 'hand') {
-    items.push({ label: 'Pitch', sub: 'stage → bottom of deck', on: () => pitchCard(card.id, 'hand') });
-    items.push({ label: 'Play / Discard', sub: '→ graveyard', on: () => discardCard(card.id, 'hand') });
+    items.push({ label: 'Play', sub: '→ graveyard', on: () => discardCard(card.id, 'hand') });
     items.push({ label: 'Arsenal', sub: 'set aside', on: () => arsenalCard(card.id, 'hand') });
-    items.push({ label: 'Banish', sub: 'remove from play', on: () => banishCard(card.id, 'hand') });
+    items.push({ label: 'Banish', sub: 'remove', on: () => banishCard(card.id, 'hand') });
+    items.push({ label: 'Pitch', sub: '→ bottom', on: () => pitchCard(card.id, 'hand') });
+  } else if (zone === 'arena') {
+    items.push({ label: 'Play / Discard', sub: '→ graveyard', on: () => discardCard(card.id, 'arena') });
+    items.push({ label: 'Banish', sub: 'remove from play', on: () => banishCard(card.id, 'arena') });
   } else if (zone === 'arsenal') {
     items.push({ label: 'Play / Discard', sub: '→ graveyard', on: () => discardCard(card.id, 'arsenal') });
     items.push({ label: 'Pitch', sub: 'stage → bottom', on: () => pitchCard(card.id, 'arsenal') });
     items.push({ label: 'Return to hand', on: () => returnToHand(card.id, 'arsenal') });
     items.push({ label: 'Banish', sub: 'remove from play', on: () => banishCard(card.id, 'arsenal') });
   } else if (zone === 'graveyard') {
-    items.push({ label: 'Return to hand', on: () => returnToHand(card.id, 'graveyard') });
+    if (card.equip) items.push({ label: 'Return to gear', sub: 'back to arena', on: () => moveCardToast(card.id, 'graveyard', 'arena') });
+    else items.push({ label: 'Return to hand', on: () => returnToHand(card.id, 'graveyard') });
     items.push({ label: 'Banish', sub: 'remove from play', on: () => banishCard(card.id, 'graveyard') });
   } else if (zone === 'banished') {
-    items.push({ label: 'Return to hand', on: () => returnToHand(card.id, 'banished') });
+    if (card.equip) items.push({ label: 'Return to gear', sub: 'back to arena', on: () => moveCardToast(card.id, 'banished', 'arena') });
+    else items.push({ label: 'Return to hand', on: () => returnToHand(card.id, 'banished') });
     items.push({ label: 'To graveyard', on: () => discardCard(card.id, 'banished') });
   }
   return items;
@@ -889,9 +915,14 @@ function moveCard(id, fromZone, toZone) {
   const [card] = arr.splice(i, 1);
   State[toZone].push(card);
   renderPlay();
-  // if a zone viewer is open, refresh it (a card just left/entered a zone)
+  // refresh any open overlay so its list reflects the move
   if (openZone) openZoneViewer(openZone);
+  if (document.getElementById('info-viewer')) openInfoViewer();
   return card;
+}
+function moveCardToast(id, fromZone, toZone) {
+  const c = moveCard(id, fromZone, toZone);
+  if (c) toast(`${c.name} → ${toZone === 'arena' ? 'gear' : toZone}`);
 }
 
 function zoneCardById(zone, id) {
@@ -912,14 +943,15 @@ function discardCard(id, fromZone = 'hand') {
   if (c) toast(`${c.name} → graveyard`);
 }
 const ARSENAL_FULL_QUIPS = [
-  'bro what are you doing? 🤨 arsenal holds 1',
+  'bro what are you doing? 🤨 arsenal is full',
   'one at a time, champ — arsenal is full',
-  'easy there, the arsenal fits a single card',
-  'nice try. arsenal = 1 card. them’s the rules',
+  'easy there, the arsenal is at its limit',
+  'nice try. the arsenal’s full, them’s the rules',
 ];
 function arsenalCard(id, fromZone = 'hand') {
-  if (State.arsenal.length >= 1) {
-    toast(ARSENAL_FULL_QUIPS[Math.floor(Math.random() * ARSENAL_FULL_QUIPS.length)]);
+  if (State.arsenal.length >= State.arsenalLimit) {
+    const q = ARSENAL_FULL_QUIPS[Math.floor(Math.random() * ARSENAL_FULL_QUIPS.length)];
+    toast(State.arsenalLimit === 1 ? q : `arsenal is full (limit ${State.arsenalLimit})`);
     return;
   }
   const c = moveCard(id, fromZone, 'arsenal');
@@ -1115,12 +1147,14 @@ function openInfoViewer() {
   closeInfoViewer();
   const group = (label, cards) => cards
     ? `<div class="iv-group"><span class="iv-label">${label}</span><div class="zv-grid">${cards}</div></div>` : '';
+  // hero — view only
   const heroCards = State.hero
-    ? `<div class="zv-card" data-iv-name="${escapeAttr(State.hero)}">${cardFaceHTML({ name: State.hero, pitch: null }, {})}</div>` : '';
-  const equipCards = State.equipment.map(e =>
-    `<div class="zv-card" data-iv-name="${escapeAttr(e.name)}">${cardFaceHTML({ name: e.name, pitch: null }, {})}</div>`).join('');
+    ? `<div class="zv-card" data-iv-hero="1" data-iv-name="${escapeAttr(State.hero)}">${cardFaceHTML({ name: State.hero, pitch: null }, {})}</div>` : '';
+  // equipment in the arena — tap to play/discard (zone 'arena')
+  const equipCards = State.arena.map(c =>
+    `<div class="zv-card" data-id="${c.id}">${cardFaceHTML(c, {})}</div>`).join('');
   const body = (heroCards || equipCards)
-    ? group('Hero', heroCards) + group('Equipment &amp; weapons', equipCards)
+    ? group('Hero', heroCards) + group('Equipment &amp; weapons · tap to play', equipCards)
     : '<div class="ps-empty">No hero or equipment found in this deck.</div>';
 
   const el = document.createElement('div');
@@ -1133,7 +1167,7 @@ function openInfoViewer() {
       <div class="sheet-head">
         <div>
           <div class="sheet-title">HERO &amp; GEAR</div>
-          <div class="sheet-sub">reference only · tap a card to enlarge</div>
+          <div class="sheet-sub">tap equipment to play it to the graveyard</div>
         </div>
         <div class="zv-close" id="iv-close">&times;</div>
       </div>
@@ -1143,10 +1177,61 @@ function openInfoViewer() {
 
   document.getElementById('iv-scrim').onclick = closeInfoViewer;
   document.getElementById('iv-close').onclick = closeInfoViewer;
-  el.querySelectorAll('.zv-card[data-iv-name]').forEach(c => {
+  // hero: view-only zoom
+  el.querySelectorAll('.zv-card[data-iv-hero]').forEach(c => {
     c.addEventListener('click', () => showCardZoom({ name: c.dataset.ivName, pitch: null }, 'info'));
   });
+  // equipment: zoom with play/discard actions
+  el.querySelectorAll('.zv-card[data-id]').forEach(c => {
+    c.addEventListener('click', () => showCardZoom(zoneCardById('arena', c.dataset.id), 'arena'));
+  });
   hydrateVisibleCards();
+}
+
+/* ---------- deck action menu (Draw / Peek / Banish top) ---------- */
+function closeDeckMenu() {
+  const m = document.getElementById('deck-menu');
+  if (m) m.remove();
+  document.removeEventListener('click', onDocClickDeckMenu, true);
+}
+function onDocClickDeckMenu(e) {
+  if (e.target.closest('#deck-menu')) return;
+  if (e.target.closest('[data-deck-trigger]')) return;
+  closeDeckMenu();
+}
+function banishTopOfDeck() {
+  if (!State.deck.length) { toast('Deck is empty'); return; }
+  const c = State.deck.shift();
+  State.banished.push(c);
+  renderPlay();
+  toast(`${c.name} → banished (off the top)`);
+}
+function showDeckMenu(anchorEl) {
+  if (document.getElementById('deck-menu')) { closeDeckMenu(); return; } // toggle
+  const items = [
+    { label: 'Draw a card', sub: 'top → hand', on: () => { if (!State.deck.length) { toast('Deck is empty'); return; } drawN(1); renderPlay(); } },
+    { label: 'Peek deck order', sub: 'top → bottom', on: togglePeek },
+    { label: 'Banish top card', sub: 'top → banished', on: banishTopOfDeck },
+  ];
+  const m = document.createElement('div');
+  m.id = 'deck-menu';
+  m.className = 'mini-menu';
+  m.innerHTML = items.map((it, i) =>
+    `<button class="mm-item" data-i="${i}"><span class="mm-label">${it.label}</span><span class="mm-sub">${it.sub}</span></button>`).join('');
+  document.body.appendChild(m);
+
+  const r = anchorEl.getBoundingClientRect();
+  let left = r.left + r.width / 2 - 100;
+  let top = r.top - 8 - m.offsetHeight;
+  if (top < 10) top = r.bottom + 8;
+  left = Math.max(10, Math.min(left, window.innerWidth - 210));
+  m.style.left = left + 'px';
+  m.style.top = top + 'px';
+
+  m.querySelectorAll('.mm-item').forEach(b => {
+    b.onclick = () => { const it = items[+b.dataset.i]; closeDeckMenu(); it.on(); };
+  });
+  setTimeout(() => document.addEventListener('click', onDocClickDeckMenu, true), 0);
 }
 
 /* ---------- Peek panel ---------- */
