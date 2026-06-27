@@ -9,7 +9,7 @@
 'use strict';
 
 /* Bump on each deploy so the import screen shows when an update landed. */
-const APP_VERSION = 'v1.4.0';
+const APP_VERSION = 'v1.4.1';
 const APP_FULL_NAME = 'Faux Again Repetition Tool';
 
 /* ---------- pitch colors / values ---------- */
@@ -504,7 +504,7 @@ function renderImport(prefill = '', errorMsg = '') {
       <div class="paste-box">
         <div class="paste-label"><span class="dot"></span><span>Deck list</span></div>
         <textarea class="paste" id="paste" spellcheck="false"
-          placeholder="Paste a Fabrary deck link — or the deck list">${escapeHtml(prefill)}</textarea>
+          placeholder="paste your deck link from fabrary">${escapeHtml(prefill)}</textarea>
       </div>
 
       <div class="helper ${errorMsg ? 'error' : ''}">
@@ -540,7 +540,6 @@ function renderImport(prefill = '', errorMsg = '') {
         State.equipment = r.equipment;
         prefetchDeck();
         renderReview();
-        toast("Imported from Fabrary — YOU'RE WELCOME, JIMMY 🫡");
       } catch (e) {
         renderImport(text, `Couldn't fetch that Fabrary deck (${e.message}). Make sure it's public, or paste the deck list instead.`);
       }
@@ -950,26 +949,28 @@ function handCardById(id) {
 function cardActionItems(card, zone) {
   const items = [];
   if (zone === 'hand') {
+    // 2×2: Play (UL), Pitch (UR), Arsenal (LL), Banish (LR)
     items.push({ label: 'Play', sub: '→ graveyard', on: () => discardCard(card.id, 'hand') });
+    items.push({ label: 'Pitch', sub: '→ bottom', on: () => pitchCard(card.id, 'hand') });
     items.push({ label: 'Arsenal', sub: 'set aside', on: () => arsenalCard(card.id, 'hand') });
     items.push({ label: 'Banish', sub: 'remove', on: () => banishCard(card.id, 'hand') });
-    items.push({ label: 'Pitch', sub: '→ bottom', on: () => pitchCard(card.id, 'hand') });
   } else if (zone === 'arena') {
-    items.push({ label: 'Play / Discard', sub: '→ graveyard', on: () => discardCard(card.id, 'arena') });
-    items.push({ label: 'Banish', sub: 'remove from play', on: () => banishCard(card.id, 'arena') });
+    items.push({ label: 'Play', sub: '→ graveyard', on: () => discardCard(card.id, 'arena') });
+    items.push({ label: 'Banish', sub: 'remove', on: () => banishCard(card.id, 'arena') });
   } else if (zone === 'arsenal') {
-    items.push({ label: 'Play / Discard', sub: '→ graveyard', on: () => discardCard(card.id, 'arsenal') });
-    items.push({ label: 'Pitch', sub: 'stage → bottom', on: () => pitchCard(card.id, 'arsenal') });
-    items.push({ label: 'Return to hand', on: () => returnToHand(card.id, 'arsenal') });
-    items.push({ label: 'Banish', sub: 'remove from play', on: () => banishCard(card.id, 'arsenal') });
+    // 2×2: Play, Pitch, Return, Banish
+    items.push({ label: 'Play', sub: '→ graveyard', on: () => discardCard(card.id, 'arsenal') });
+    items.push({ label: 'Pitch', sub: '→ bottom', on: () => pitchCard(card.id, 'arsenal') });
+    items.push({ label: 'Return', sub: 'to hand', on: () => returnToHand(card.id, 'arsenal') });
+    items.push({ label: 'Banish', sub: 'remove', on: () => banishCard(card.id, 'arsenal') });
   } else if (zone === 'graveyard') {
-    if (card.equip) items.push({ label: 'Return to gear', sub: 'back to arena', on: () => moveCardToast(card.id, 'graveyard', 'arena') });
-    else items.push({ label: 'Return to hand', on: () => returnToHand(card.id, 'graveyard') });
-    items.push({ label: 'Banish', sub: 'remove from play', on: () => banishCard(card.id, 'graveyard') });
+    if (card.equip) items.push({ label: 'Return', sub: 'to gear', on: () => moveCardToast(card.id, 'graveyard', 'arena') });
+    else items.push({ label: 'Return', sub: 'to hand', on: () => returnToHand(card.id, 'graveyard') });
+    items.push({ label: 'Banish', sub: 'remove', on: () => banishCard(card.id, 'graveyard') });
   } else if (zone === 'banished') {
-    if (card.equip) items.push({ label: 'Return to gear', sub: 'back to arena', on: () => moveCardToast(card.id, 'banished', 'arena') });
-    else items.push({ label: 'Return to hand', on: () => returnToHand(card.id, 'banished') });
-    items.push({ label: 'To graveyard', on: () => discardCard(card.id, 'banished') });
+    if (card.equip) items.push({ label: 'Return', sub: 'to gear', on: () => moveCardToast(card.id, 'banished', 'arena') });
+    else items.push({ label: 'Return', sub: 'to hand', on: () => returnToHand(card.id, 'banished') });
+    items.push({ label: 'Play', sub: '→ graveyard', on: () => discardCard(card.id, 'banished') });
   }
   return items;
 }

@@ -424,7 +424,7 @@ textarea.paste::placeholder {
 }
 .hero-band .hero-sub { font: 500 11px var(--font-sans); color: var(--muted-2); }
 
-.hero-steppers { flex-shrink: 0; display: flex; gap: 12px; }
+.hero-steppers { flex-shrink: 0; display: flex; flex-direction: column; gap: 8px; }
 .intellect { flex-shrink: 0; display: flex; flex-direction: column; align-items: center; gap: 6px; }
 .intellect .lbl {
   font: 600 8.5px var(--font-mono); letter-spacing: 1.5px;
@@ -694,13 +694,13 @@ textarea.paste::placeholder {
 }
 @keyframes czPop { from { transform: scale(.82); opacity: .4; } to { transform: scale(1); opacity: 1; } }
 .card-zoom .cz-actions {
-  display: flex; flex-wrap: nowrap; gap: 8px; justify-content: center;
+  display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
   width: min(360px, 78vw);
 }
 .card-zoom .cz-btn {
-  flex: 1 1 0; min-width: 0;
+  min-width: 0;
   display: flex; flex-direction: column; align-items: center; gap: 1px;
-  padding: 11px 6px; border-radius: 11px; cursor: pointer;
+  padding: 12px 6px; border-radius: 11px; cursor: pointer;
   background: linear-gradient(180deg, #241b10, #17110a); border: 1px solid rgba(201, 166, 107, 0.5);
   color: var(--ink-head); font: 600 13px var(--font-sans);
   box-shadow: 0 6px 16px rgba(0, 0, 0, 0.5);
