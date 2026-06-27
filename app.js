@@ -9,7 +9,7 @@
 'use strict';
 
 /* Bump on each deploy so the import screen shows when an update landed. */
-const APP_VERSION = 'v1.3.0';
+const APP_VERSION = 'v1.4.0';
 const APP_FULL_NAME = 'Faux Again Repetition Tool';
 
 /* ---------- pitch colors / values ---------- */
@@ -120,6 +120,86 @@ function intellectForHero(hero) {
     if (k.split(',')[0].trim() === first) return HERO_INTELLECT[k];
   }
   return DEFAULT_INTELLECT;
+}
+
+/* ============================================================
+   Fabrary link import
+   ------------------------------------------------------------
+   Fabrary has no public REST API — its deck data lives behind an
+   AWS AppSync GraphQL endpoint. Public decks are readable by
+   GUESTS, exactly how the website does it: fetch anonymous AWS
+   credentials from their Cognito Identity Pool, then SigV4-sign
+   the getDeck query (authMode AWS_IAM). No API key, CORS is open.
+   ============================================================ */
+const FAB_REGION = 'us-east-2';
+const FAB_IDP_POOL = 'us-east-2:e50f3ed7-32ed-4b22-a05e-10b3e7e03fe0';
+const FAB_APPSYNC_HOST = '42xrd23ihbd47fjvsrt27ufpfe.appsync-api.us-east-2.amazonaws.com';
+const PITCH_BY_NUM = { 1: 'red', 2: 'yellow', 3: 'blue' };
+
+function fabDeckIdFromUrl(text) {
+  const m = String(text).match(/fabrary\.net\/decks\/([A-Za-z0-9]+)/i);
+  return m ? m[1] : null;
+}
+
+/* --- minimal SigV4 (SubtleCrypto) --- */
+const _sigEnc = new TextEncoder();
+const _sigHex = b => [...new Uint8Array(b)].map(x => x.toString(16).padStart(2, '0')).join('');
+const _sigSha = d => crypto.subtle.digest('SHA-256', typeof d === 'string' ? _sigEnc.encode(d) : d);
+async function _sigHmac(key, msg) {
+  const k = await crypto.subtle.importKey('raw', typeof key === 'string' ? _sigEnc.encode(key) : key, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  return crypto.subtle.sign('HMAC', k, _sigEnc.encode(msg));
+}
+
+async function fabGuestCreds() {
+  const idp = (target, body) => fetch(`https://cognito-identity.${FAB_REGION}.amazonaws.com/`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-amz-json-1.1', 'X-Amz-Target': 'AWSCognitoIdentityService.' + target },
+    body: JSON.stringify(body),
+  }).then(r => r.json());
+  const { IdentityId } = await idp('GetId', { IdentityPoolId: FAB_IDP_POOL });
+  if (!IdentityId) throw new Error('could not get a guest identity');
+  const j = await idp('GetCredentialsForIdentity', { IdentityId });
+  if (!j.Credentials) throw new Error('could not get guest credentials');
+  return j.Credentials;
+}
+
+async function fabGetDeck(deckId, cred) {
+  const host = FAB_APPSYNC_HOST, region = FAB_REGION, service = 'appsync';
+  const query = 'query getDeck($deckId: ID!){ getDeck(deckId:$deckId){ name format hero{ name intellect } deckCards{ quantity card{ name pitch types typeText } } } }';
+  const body = JSON.stringify({ query, variables: { deckId } });
+  const amzDate = new Date().toISOString().replace(/[:-]|\.\d{3}/g, '');
+  const dateStamp = amzDate.slice(0, 8);
+  const ch = `content-type:application/json; charset=UTF-8\nhost:${host}\nx-amz-date:${amzDate}\nx-amz-security-token:${cred.SessionToken}\n`;
+  const sh = 'content-type;host;x-amz-date;x-amz-security-token';
+  const creq = ['POST', '/graphql', '', ch, sh, _sigHex(await _sigSha(body))].join('\n');
+  const scope = `${dateStamp}/${region}/${service}/aws4_request`;
+  const sts = ['AWS4-HMAC-SHA256', amzDate, scope, _sigHex(await _sigSha(creq))].join('\n');
+  let k = await _sigHmac('AWS4' + cred.SecretKey, dateStamp);
+  k = await _sigHmac(k, region); k = await _sigHmac(k, service); k = await _sigHmac(k, 'aws4_request');
+  const auth = `AWS4-HMAC-SHA256 Credential=${cred.AccessKeyId}/${scope}, SignedHeaders=${sh}, Signature=${_sigHex(await _sigHmac(k, sts))}`;
+  const res = await fetch(`https://${host}/graphql`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json; charset=UTF-8', 'X-Amz-Date': amzDate, 'X-Amz-Security-Token': cred.SessionToken, 'Authorization': auth },
+    body,
+  });
+  const json = await res.json();
+  if (json.errors) throw new Error(json.errors[0] && json.errors[0].message || 'graphql error');
+  if (!json.data || !json.data.getDeck) throw new Error('deck not found — is it public?');
+  return json.data.getDeck;
+}
+
+/** Fetch a Fabrary deck by id → same shape as parseDecklist. */
+async function importFabraryDeck(deckId) {
+  const cred = await fabGuestCreds();
+  const d = await fabGetDeck(deckId, cred);
+  const deck = [], equipment = [];
+  for (const c of (d.deckCards || [])) {
+    if (!c.quantity) continue;                 // skip sideboard / maybe-board (quantity 0)
+    const pitch = PITCH_BY_NUM[c.card.pitch];
+    if (pitch) deck.push({ name: c.card.name, pitch, qty: c.quantity });
+    else equipment.push({ name: c.card.name, qty: c.quantity });   // weapons / equipment / arena
+  }
+  return { hero: (d.hero && d.hero.name) || '', intellect: d.hero && d.hero.intellect, deck, equipment, name: d.name };
 }
 
 /* ============================================================
@@ -424,12 +504,12 @@ function renderImport(prefill = '', errorMsg = '') {
       <div class="paste-box">
         <div class="paste-label"><span class="dot"></span><span>Deck list</span></div>
         <textarea class="paste" id="paste" spellcheck="false"
-          placeholder="Paste your Fabrary deck list here">${escapeHtml(prefill)}</textarea>
+          placeholder="Paste a Fabrary deck link — or the deck list">${escapeHtml(prefill)}</textarea>
       </div>
 
       <div class="helper ${errorMsg ? 'error' : ''}">
         <span class="i">i</span>
-        <span>${errorMsg ? escapeHtml(errorMsg) : 'Use Fabrary&rsquo;s &ldquo;copy deck list&rdquo; button.'}</span>
+        <span>${errorMsg ? escapeHtml(errorMsg) : 'Paste a Fabrary deck link, or its &ldquo;Copy deck list&rdquo; text.'}</span>
       </div>
 
       <div class="setup-actions">
@@ -440,12 +520,36 @@ function renderImport(prefill = '', errorMsg = '') {
     </div>
   `);
 
-  document.getElementById('import-btn').onclick = () => {
+  document.getElementById('import-btn').onclick = async () => {
     const text = document.getElementById('paste').value;
+    const fabId = fabDeckIdFromUrl(text);
     const parsed = parseDecklist(text);
+
+    // --- Fabrary link import (when a link is pasted and there's no card list) ---
+    if (fabId && parsed.deck.length === 0) {
+      const btn = document.getElementById('import-btn');
+      const prev = btn.innerHTML;
+      btn.innerHTML = 'Summoning from Fabrary…';
+      btn.style.pointerEvents = 'none';
+      try {
+        const r = await importFabraryDeck(fabId);
+        if (!r.deck.length) throw new Error('no drawable cards in that deck');
+        State.hero = r.hero;
+        State.intellect = (r.intellect != null ? r.intellect : intellectForHero(r.hero));
+        State.reviewDeck = r.deck.map(x => ({ ...x, orig: x.qty }));
+        State.equipment = r.equipment;
+        prefetchDeck();
+        renderReview();
+        toast("Imported from Fabrary — YOU'RE WELCOME, JIMMY 🫡");
+      } catch (e) {
+        renderImport(text, `Couldn't fetch that Fabrary deck (${e.message}). Make sure it's public, or paste the deck list instead.`);
+      }
+      return;
+    }
+
     if (parsed.deck.length === 0) {
       if (/fabrary\.net/i.test(text)) {
-        renderImport(text, "That's a Fabrary link — it can't auto-import (Fabrary has no public deck API). In Fabrary, tap “⋯” → “Copy deck list”, and paste THAT here instead. You're welcome, Jimmy. 🫡");
+        renderImport(text, "That's a Fabrary link but I couldn't read a deck id from it. Paste the full deck URL, or use “Copy deck list” instead.");
       } else {
         renderImport(text, 'No deck cards found. Make sure cards have a pitch tag like (red).');
       }
